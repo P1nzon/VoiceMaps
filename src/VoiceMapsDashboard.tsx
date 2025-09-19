@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Mic, MicOff, MapPin, Volume2 } from 'lucide-react';
+import { Mic, MicOff, MapPin, Volume2, Star, Clock, Navigation } from 'lucide-react';
+import { aiAgentService, apifyService, redisService, minimaxService } from './services/apiServices';
 
 const VoiceMapsDashboard = () => {
   const [isListening, setIsListening] = useState(false);
@@ -14,6 +15,8 @@ const VoiceMapsDashboard = () => {
     color: string;
   }>>([]);
   const [recognition, setRecognition] = useState<any>(null);
+  const [mapResults, setMapResults] = useState<any[]>([]);
+  const [sessionId] = useState(() => `session_${Date.now()}`);
 
   // Dynamic voice waveform
   const [waveform, setWaveform] = useState([30, 60, 40, 80, 50, 70, 45, 65, 35]);
@@ -37,17 +40,39 @@ const VoiceMapsDashboard = () => {
       recognitionInstance.interimResults = false;
       recognitionInstance.lang = 'en-US';
       
-      recognitionInstance.onresult = (event: any) => {
+      recognitionInstance.onresult = async (event: any) => {
         const transcript = event.results[0][0].transcript;
         setVoiceCommand(transcript);
         setIsListening(false);
         setIsProcessing(true);
         
-        // Simulate AI processing and response
-        setTimeout(() => {
-          setAiResponse(`I heard: "${transcript}". Searching maps for your request...`);
+        try {
+          // Store conversation in Redis
+          await redisService.storeConversation(sessionId, transcript);
+          
+          // Process command with AI agent
+          const aiResult = await aiAgentService.processVoiceCommand(transcript);
+          setAiResponse(aiResult.response);
+          
+          // Use Minimax to speak the AI response
+          await minimaxService.generateVoice(aiResult.response);
+          
+          // Search for places using Apify
+          if (aiResult.mapQuery) {
+            const places = await apifyService.searchPlaces(aiResult.mapQuery);
+            setMapResults(places);
+            
+            // Speak the results summary using Minimax
+            const summary = `Found ${places.length} places. The closest is ${places[0]?.name} at ${places[0]?.distance}.`;
+            await minimaxService.generateVoice(summary);
+          }
+          
           setIsProcessing(false);
-        }, 2000);
+        } catch (error) {
+          console.error('Error processing voice command:', error);
+          setAiResponse("Sorry, I encountered an error processing your request.");
+          setIsProcessing(false);
+        }
       };
       
       recognitionInstance.onerror = (event: any) => {
@@ -262,14 +287,56 @@ const VoiceMapsDashboard = () => {
           <div className="flex items-center space-x-3 mb-4">
             <MapPin className="w-5 h-5 text-cyan-400" />
             <h3 className="text-lg font-bold text-white">Live Map Results</h3>
+            {mapResults.length > 0 && (
+              <span className="text-sm text-green-400 bg-green-400/20 px-2 py-1 rounded-full">
+                {mapResults.length} places found
+              </span>
+            )}
           </div>
-          <div className="bg-gray-800 rounded-xl h-full flex items-center justify-center border border-gray-600">
-            <div className="text-center">
-              <MapPin className="w-12 h-12 text-cyan-400 mx-auto mb-3 animate-bounce" />
-              <p className="text-gray-400 font-medium">Google Maps Integration</p>
-              <p className="text-sm text-gray-500 mt-1">Powered by Apify</p>
+          
+          {mapResults.length > 0 ? (
+            <div className="bg-gray-800 rounded-xl h-full p-4 border border-gray-600 overflow-y-auto">
+              <div className="grid gap-4">
+                {mapResults.map((place, index) => (
+                  <div key={index} className="bg-gray-700/50 rounded-lg p-4 border border-gray-600/50 hover:border-cyan-400/50 transition-all">
+                    <div className="flex justify-between items-start mb-2">
+                      <h4 className="text-lg font-semibold text-white">{place.name}</h4>
+                      <div className="flex items-center space-x-1 text-yellow-400">
+                        <Star className="w-4 h-4 fill-current" />
+                        <span className="text-sm">{place.rating}</span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center space-x-2 text-gray-300 mb-2">
+                      <MapPin className="w-4 h-4 text-cyan-400" />
+                      <span className="text-sm">{place.address}</span>
+                    </div>
+                    
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2 text-gray-300">
+                        <Clock className="w-4 h-4 text-green-400" />
+                        <span className="text-sm">{place.hours}</span>
+                      </div>
+                      
+                      <div className="flex items-center space-x-2 text-gray-300">
+                        <Navigation className="w-4 h-4 text-blue-400" />
+                        <span className="text-sm">{place.distance}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="bg-gray-800 rounded-xl h-full flex items-center justify-center border border-gray-600">
+              <div className="text-center">
+                <MapPin className="w-12 h-12 text-cyan-400 mx-auto mb-3 animate-bounce" />
+                <p className="text-gray-400 font-medium">Google Maps Integration</p>
+                <p className="text-sm text-gray-500 mt-1">Powered by Apify MCP</p>
+                <p className="text-xs text-gray-600 mt-2">Say something like "Find restaurants near me"</p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
