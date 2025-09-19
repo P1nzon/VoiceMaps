@@ -6,7 +6,14 @@ const VoiceMapsDashboard = () => {
   const [voiceCommand, setVoiceCommand] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [aiResponse, setAiResponse] = useState('');
-  const [particles, setParticles] = useState([]);
+  const [particles, setParticles] = useState<Array<{
+    id: number;
+    x: number;
+    y: number;
+    size: number;
+    color: string;
+  }>>([]);
+  const [recognition, setRecognition] = useState<any>(null);
 
   // Dynamic voice waveform
   const [waveform, setWaveform] = useState([30, 60, 40, 80, 50, 70, 45, 65, 35]);
@@ -19,6 +26,48 @@ const VoiceMapsDashboard = () => {
       return () => clearInterval(interval);
     }
   }, [isListening]);
+
+  // Initialize speech recognition
+  useEffect(() => {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const recognitionInstance = new SpeechRecognition();
+      
+      recognitionInstance.continuous = false;
+      recognitionInstance.interimResults = false;
+      recognitionInstance.lang = 'en-US';
+      
+      recognitionInstance.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        setVoiceCommand(transcript);
+        setIsListening(false);
+        setIsProcessing(true);
+        
+        // Simulate AI processing and response
+        setTimeout(() => {
+          setAiResponse(`I heard: "${transcript}". Searching maps for your request...`);
+          setIsProcessing(false);
+        }, 2000);
+      };
+      
+      recognitionInstance.onerror = (event: any) => {
+        setIsListening(false);
+        if (event.error === 'not-allowed') {
+          setAiResponse("Please allow microphone access to use voice commands.");
+        } else if (event.error === 'no-speech') {
+          setAiResponse("No speech detected. Please try speaking again.");
+        } else {
+          setAiResponse("Voice recognition error. Please try again.");
+        }
+      };
+      
+      recognitionInstance.onend = () => {
+        setIsListening(false);
+      };
+      
+      setRecognition(recognitionInstance);
+    }
+  }, []);
 
   // Floating particles effect
   useEffect(() => {
@@ -37,21 +86,14 @@ const VoiceMapsDashboard = () => {
   }, [isProcessing]);
 
   const handleVoiceToggle = () => {
-    if (!isListening) {
+    if (!isListening && recognition) {
       setIsListening(true);
       setVoiceCommand('');
-      setTimeout(() => {
-        setVoiceCommand("Find restaurants open after 10 PM near me");
-        setIsListening(false);
-        setIsProcessing(true);
-        
-        setTimeout(() => {
-          setAiResponse("I found 3 amazing places for you! Neon Bistro is the closest and has late-night vibes. All are open late tonight!");
-          setIsProcessing(false);
-        }, 3000);
-      }, 4000);
-    } else {
+      setAiResponse('');
+      recognition.start();
+    } else if (isListening && recognition) {
       setIsListening(false);
+      recognition.stop();
     }
   };
 
